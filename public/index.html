@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gato Multijugador</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding-top: 20px;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            grid-template-rows: repeat(3, 100px);
+            gap: 5px;
+            margin: 20px auto;
+            width: 310px;
+            border: 2px solid #333;
+        }
+        .cell {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 3em;
+            cursor: pointer;
+        }
+        #status {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        #reset-button {
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Gato Multijugador</h1>
+    <p id="status">Esperando jugadores...</p>
+    <div class="board">
+        </div>
+    <button id="reset-button" style="display: none;">Reiniciar Juego</button>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        var socket = io();
+        var boardElement = document.querySelector('.board');
+        var statusElement = document.getElementById('status');
+        var resetButton = document.getElementById('reset-button');
+        var gameActive = true;
+
+        // Genera la cuadrícula del tablero
+        for (let i = 0; i < 9; i++) {
+            const cell = document.createElement('div');
+            cell.classList.add('cell');
+            cell.dataset.index = i;
+            cell.addEventListener('click', () => {
+                if (gameActive) {
+                    socket.emit('make move', i);
+                }
+            });
+            boardElement.appendChild(cell);
+        }
+
+        // Escucha el estado del juego del servidor
+        socket.on('game state', (state) => {
+            state.board.forEach((cell, index) => {
+                boardElement.children[index].textContent = cell;
+            });
+            statusElement.textContent = `Turno del jugador ${state.currentPlayer}`;
+            gameActive = state.gameActive;
+            if (gameActive) {
+                resetButton.style.display = 'none';
+            }
+        });
+
+        // Escucha el fin del juego
+        socket.on('game over', (data) => {
+            gameActive = false;
+            if (data.isDraw) {
+                statusElement.textContent = "¡Empate!";
+            } else {
+                statusElement.textContent = `¡El jugador ${data.winner} ha ganado!`;
+            }
+            resetButton.style.display = 'block';
+        });
+
+        resetButton.addEventListener('click', () => {
+            socket.emit('reset game');
+        });
+    </script>
+</body>
+</html>

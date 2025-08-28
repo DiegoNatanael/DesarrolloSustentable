@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const os = require('os');
 
 const app = express();
 const server = http.createServer(app);
@@ -8,24 +9,18 @@ const io = socketIo(server);
 
 const PORT = process.env.PORT || 3000;
 
-// Estado del juego
 let board = Array(9).fill(null);
 let currentPlayer = 'X';
-let gameActive = true;
+let gameActive = false; // El juego no comienza hasta que haya 2 jugadores
+let players = {
+    'X': null, // ID del socket del jugador X
+    'O': null  // ID del socket del jugador O
+};
 
-// Define las combinaciones ganadoras
 const winningCombinations = [
-    [0, 1, 2],
-    [3, 4, 5],
-    [6, 7, 8],
-    [0, 3, 6],
-    [1, 4, 7],
-    [2, 5, 8],
-    [0, 4, 8],
-    [2, 4, 6]
+    [0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]
 ];
 
-// Función para verificar si alguien ha ganado
 function checkWinner() {
     for (const combination of winningCombinations) {
         const [a, b, c] = combination;
@@ -37,36 +32,61 @@ function checkWinner() {
     return null;
 }
 
-// Función para verificar si hay un empate
 function checkDraw() {
     return board.every(cell => cell !== null);
 }
 
-// Envía el estado del juego a todos los clientes
 function sendGameState() {
-    io.emit('game state', { board, currentPlayer, gameActive });
+    // Envía el estado del juego a todos los clientes.
+    // También se envía el ID del jugador actual para que los clientes puedan mostrar el mensaje de "tu turno".
+    io.emit('game state', { board, currentPlayer, gameActive, players });
 }
 
-// Resetea el juego
 function resetGame() {
     board = Array(9).fill(null);
     currentPlayer = 'X';
-    gameActive = true;
+    gameActive = false;
     sendGameState();
 }
 
-// Sirve los archivos estáticos
+function getLocalIpAddress() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return '127.0.0.1';
+}
+
 app.use(express.static(__dirname + '/public'));
 
 io.on('connection', (socket) => {
-    console.log('Un nuevo jugador se ha conectado.');
-    // Envía el estado inicial al nuevo jugador
+    // Asigna el rol al jugador si hay espacio
+    if (!players['X']) {
+        players['X'] = socket.id;
+        console.log(`Jugador X se ha unido. ID: ${socket.id}`);
+        socket.emit('player role', 'X');
+    } else if (!players['O']) {
+        players['O'] = socket.id;
+        console.log(`Jugador O se ha unido. ID: ${socket.id}`);
+        socket.emit('player role', 'O');
+        gameActive = true; // Empieza el juego cuando el segundo jugador se une
+        io.emit('game start');
+    } else {
+        console.log(`Observador se ha unido. ID: ${socket.id}`);
+        // Los nuevos jugadores son observadores
+    }
+
     sendGameState();
 
-    // Escucha cuando un jugador hace un movimiento
     socket.on('make move', (index) => {
-        if (!gameActive || board[index] !== null) {
-            return; // Movimiento inválido
+        // Valida que la jugada provenga del jugador correcto
+        if (!gameActive || board[index] !== null || players[currentPlayer] !== socket.id) {
+            console.log(`Movimiento inválido de ${socket.id}. No es su turno o la casilla está ocupada.`);
+            return;
         }
         
         board[index] = currentPlayer;
@@ -82,23 +102,33 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Cambia el turno
         currentPlayer = (currentPlayer === 'X') ? 'O' : 'X';
         sendGameState();
     });
 
-    // Escucha cuando se reinicia el juego
     socket.on('reset game', () => {
         console.log('Juego reiniciado por un jugador.');
         resetGame();
     });
 
     socket.on('disconnect', () => {
-        console.log('Un jugador se ha desconectado.');
+        // Remueve al jugador desconectado de la lista
+        if (socket.id === players['X']) {
+            players['X'] = null;
+            gameActive = false;
+            console.log('Jugador X se ha desconectado.');
+        } else if (socket.id === players['O']) {
+            players['O'] = null;
+            gameActive = false;
+            console.log('Jugador O se ha desconectado.');
+        }
+        resetGame(); // Reinicia el juego si un jugador se va
     });
 });
 
 server.listen(PORT, () => {
+    const localIp = getLocalIpAddress();
     console.log(`Servidor de Gato escuchando en el puerto: ${PORT}`);
-    console.log('Conéctate desde otros dispositivos usando la dirección IP local.');
+    console.log(`Para jugar, usa la siguiente dirección en dos dispositivos diferentes:`);
+    console.log(`http://${localIp}:${PORT}`);
 });

@@ -29,52 +29,78 @@
             font-size: 1.5em;
             font-weight: bold;
         }
+        #player-role {
+            font-size: 1.2em;
+            margin-top: 5px;
+        }
         #reset-button {
             padding: 10px 20px;
             font-size: 1em;
             cursor: pointer;
             margin-top: 10px;
+            display: none;
         }
     </style>
 </head>
 <body>
     <h1>Gato Multijugador</h1>
+    <p id="player-role"></p>
     <p id="status">Esperando jugadores...</p>
     <div class="board">
         </div>
-    <button id="reset-button" style="display: none;">Reiniciar Juego</button>
+    <button id="reset-button">Reiniciar Juego</button>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         var socket = io();
         var boardElement = document.querySelector('.board');
         var statusElement = document.getElementById('status');
+        var playerRoleElement = document.getElementById('player-role');
         var resetButton = document.getElementById('reset-button');
-        var gameActive = true;
+        var gameActive = false;
+        var myRole = null;
 
-        // Genera la cuadrícula del tablero
         for (let i = 0; i < 9; i++) {
             const cell = document.createElement('div');
             cell.classList.add('cell');
             cell.dataset.index = i;
             cell.addEventListener('click', () => {
-                if (gameActive) {
+                // Solo permite el clic si el juego está activo y es tu turno
+                if (gameActive && myRole) {
                     socket.emit('make move', i);
                 }
             });
             boardElement.appendChild(cell);
         }
 
+        // Asigna el rol al jugador
+        socket.on('player role', (role) => {
+            myRole = role;
+            playerRoleElement.textContent = `Eres el jugador ${myRole}`;
+        });
+
+        // El juego comienza cuando hay 2 jugadores
+        socket.on('game start', () => {
+            gameActive = true;
+            statusElement.textContent = `Turno del jugador X`;
+        });
+        
         // Escucha el estado del juego del servidor
         socket.on('game state', (state) => {
             state.board.forEach((cell, index) => {
                 boardElement.children[index].textContent = cell;
             });
-            statusElement.textContent = `Turno del jugador ${state.currentPlayer}`;
-            gameActive = state.gameActive;
-            if (gameActive) {
-                resetButton.style.display = 'none';
+            if (state.gameActive) {
+                if (myRole === state.currentPlayer) {
+                    statusElement.textContent = `¡Es tu turno, ${myRole}!`;
+                } else {
+                    statusElement.textContent = `Turno del jugador ${state.currentPlayer}`;
+                }
+            } else {
+                 statusElement.textContent = 'Esperando a otro jugador...';
             }
+            gameActive = state.gameActive;
+            resetButton.style.display = 'none';
         });
 
         // Escucha el fin del juego
